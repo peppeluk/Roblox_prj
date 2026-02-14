@@ -8,6 +8,12 @@ local FLIP_RECOVERY_DELAY = 1.2
 local FLIP_RECOVERY_COOLDOWN = 2
 local FLIP_RECOVERY_LIFT = 3.5
 local MAX_RECOVERY_SPEED = 35
+local SPAWN_FALLBACK_OFFSET = Vector3.new(-12, 0, 0)
+local SPAWN_RAY_HEIGHT = 140
+local SPAWN_RAY_DISTANCE = 400
+local SPAWN_CLEARANCE = 2.8
+local SPAWN_FREE_CHECK_STEPS = 8
+local SPAWN_RAISE_STEP = 1.5
 
 local oldCar = workspace:FindFirstChild(CAR_NAME)
 if oldCar then
@@ -69,6 +75,59 @@ local function createWheel(car, name, position)
 	rimWeld.Parent = rim
 
 	return wheel
+end
+
+local function getSpawnBaseCFrame()
+	local spawnPart = workspace:FindFirstChild("CarSpawn")
+	if spawnPart and spawnPart:IsA("BasePart") then
+		return spawnPart.CFrame
+	end
+
+	local citta = workspace:FindFirstChild("Citta")
+	local strada = citta and citta:FindFirstChild("Strada")
+	if strada and strada:IsA("BasePart") then
+		local margin = 3
+		local maxX = math.max(0, (strada.Size.X * 0.5) - margin)
+		local maxZ = math.max(0, (strada.Size.Z * 0.5) - margin)
+		local offsetX = math.clamp(SPAWN_FALLBACK_OFFSET.X, -maxX, maxX)
+		local offsetZ = math.clamp(SPAWN_FALLBACK_OFFSET.Z, -maxZ, maxZ)
+		return strada.CFrame * CFrame.new(offsetX, 0, offsetZ)
+	end
+
+	return CFrame.new(SPAWN_FALLBACK_OFFSET)
+end
+
+local function getSafeSpawnCFrame(car)
+	local baseCFrame = getSpawnBaseCFrame()
+	local basePosition = baseCFrame.Position
+	local _, baseYaw, _ = baseCFrame:ToOrientation()
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = { car }
+	raycastParams.IgnoreWater = true
+
+	local rayOrigin = basePosition + Vector3.new(0, SPAWN_RAY_HEIGHT, 0)
+	local rayResult = workspace:Raycast(rayOrigin, Vector3.new(0, -SPAWN_RAY_DISTANCE, 0), raycastParams)
+	local groundY = rayResult and rayResult.Position.Y or basePosition.Y
+	local spawnCFrame = CFrame.new(basePosition.X, groundY + SPAWN_CLEARANCE, basePosition.Z) * CFrame.Angles(0, baseYaw, 0)
+
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = { car }
+
+	local _, boundsSize = car:GetBoundingBox()
+	local checkSize = boundsSize + Vector3.new(0.6, 0.6, 0.6)
+
+	for _ = 1, SPAWN_FREE_CHECK_STEPS do
+		local overlaps = workspace:GetPartBoundsInBox(spawnCFrame, checkSize, overlapParams)
+		if #overlaps == 0 then
+			break
+		end
+		spawnCFrame += Vector3.new(0, SPAWN_RAISE_STEP, 0)
+	end
+
+	return spawnCFrame
 end
 
 local function createCar()
@@ -200,6 +259,12 @@ local function createCar()
 	pcall(function()
 		carBody:SetNetworkOwner(nil)
 	end)
+
+	local spawnCFrame = getSafeSpawnCFrame(car)
+	car:PivotTo(spawnCFrame)
+	carBody.AssemblyLinearVelocity = Vector3.zero
+	carBody.AssemblyAngularVelocity = Vector3.zero
+	turnGyro.CFrame = carBody.CFrame
 
 	local function getControllingSeat()
 		if driverSeat.Occupant then
