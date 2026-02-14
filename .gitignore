@@ -1,0 +1,10 @@
+# Roblox place files
+*.rbxlx
+*.rbxl
+
+# Roblox Studio lock files
+*.rbxlx.lock
+*.rbxl.lock
+
+# Rojo output
+sourcemap.json
