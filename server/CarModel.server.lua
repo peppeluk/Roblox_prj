@@ -287,6 +287,29 @@ local function createCar()
 		return flatForward.Unit
 	end
 
+	local function getDrivingInput(seat)
+		local reverseInput = math.max(0, seat.ThrottleFloat)
+		local steerInput = seat.SteerFloat
+
+		local occupantHumanoid = seat.Occupant
+		if occupantHumanoid then
+			local moveDirection = occupantHumanoid.MoveDirection
+			if moveDirection.Magnitude > 0.05 then
+				local localMove = carBody.CFrame:VectorToObjectSpace(moveDirection.Unit)
+				-- Usa gli stessi input del cammino (stick sinistro / WASD):
+				-- avanti (W/stick su) = retromarcia, indietro ignorato.
+				reverseInput = math.max(0, -localMove.Z)
+				steerInput = math.clamp(localMove.X, -1, 1)
+			end
+		end
+
+		if math.abs(steerInput) < 0.03 then
+			steerInput = 0
+		end
+
+		return reverseInput, steerInput
+	end
+
 	local function recoverIfFlipped(now)
 		local upDot = carBody.CFrame.UpVector:Dot(Vector3.yAxis)
 		local speed = carBody.AssemblyLinearVelocity.Magnitude
@@ -336,9 +359,7 @@ local function createCar()
 			return
 		end
 
-		-- Variante richiesta: W guida in retromarcia (S ignorato).
-		local reverseInput = math.max(0, seat.ThrottleFloat)
-		local steerInput = seat.SteerFloat
+		local reverseInput, steerInput = getDrivingInput(seat)
 
 		reverseVelocity.Velocity = (-carBody.CFrame.LookVector) * (REVERSE_SPEED * reverseInput)
 
