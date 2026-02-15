@@ -16,6 +16,8 @@ local DEFAULT_PITCH = math.rad(-10)
 local MOUSE_SENSITIVITY = 0.0035
 local GAMEPAD_SENSITIVITY = 2.3
 local GAMEPAD_DEADZONE = 0.15
+local GAMEPAD_RESPONSE_CURVE = 1.6
+local GAMEPAD_LOOK_LERP_SPEED = 18
 local MOUSE_WHEEL_STEP = 1.2
 local GAMEPAD_ZOOM_SPEED = 14
 local ZOOM_LERP_SPEED = 12
@@ -27,6 +29,7 @@ local targetDistance = DEFAULT_DISTANCE
 local currentDistance = DEFAULT_DISTANCE
 local rightMouseDown = false
 local gamepadLook = Vector2.zero
+local smoothedGamepadLook = Vector2.zero
 local leftTriggerValue = 0
 local rightTriggerValue = 0
 
@@ -36,6 +39,10 @@ end
 
 local function clampDistance(value)
 	return math.clamp(value, MIN_DISTANCE, MAX_DISTANCE)
+end
+
+local function isTextBoxFocused()
+	return UserInputService:GetFocusedTextBox() ~= nil
 end
 
 local function getRoot(character)
@@ -78,11 +85,10 @@ local function setMouseLookActive(isActive)
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return
-	end
-
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		if gameProcessed then
+			return
+		end
 		setMouseLookActive(true)
 		return
 	end
@@ -114,17 +120,10 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return
-	end
-
-	if input.UserInputType == Enum.UserInputType.MouseMovement and rightMouseDown then
-		yaw -= input.Delta.X * MOUSE_SENSITIVITY
-		pitch = clampPitch(pitch + input.Delta.Y * MOUSE_SENSITIVITY)
-		return
-	end
-
 	if input.UserInputType == Enum.UserInputType.MouseWheel then
+		if gameProcessed or isTextBoxFocused() then
+			return
+		end
 		setTargetDistance(targetDistance - (input.Position.Z * MOUSE_WHEEL_STEP))
 		return
 	end
@@ -140,14 +139,38 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	end
 end)
 
-local function getLookInput(dt)
-	local look = gamepadLook
-	if look.Magnitude < GAMEPAD_DEADZONE then
+local function applyGamepadCurve(raw)
+	local mag = raw.Magnitude
+	if mag < GAMEPAD_DEADZONE then
+		return Vector2.zero
+	end
+
+	local scaled = (mag - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE)
+	scaled = scaled ^ GAMEPAD_RESPONSE_CURVE
+	return raw.Unit * scaled
+end
+
+local function updateLookInput(dt)
+	if isTextBoxFocused() then
 		return
 	end
 
-	yaw -= look.X * GAMEPAD_SENSITIVITY * dt
-	pitch = clampPitch(pitch - look.Y * GAMEPAD_SENSITIVITY * dt)
+	-- Mouse look: attivo con RMB oppure quando il mouse e' gia' lockato (es. shift-lock).
+	if rightMouseDown or UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+		local delta = UserInputService:GetMouseDelta()
+		if delta.Magnitude > 0 then
+			yaw -= delta.X * MOUSE_SENSITIVITY
+			pitch = clampPitch(pitch + delta.Y * MOUSE_SENSITIVITY)
+		end
+	end
+
+	-- Gamepad look (leva destra) con deadzone+curva e smoothing.
+	local target = applyGamepadCurve(gamepadLook)
+	smoothedGamepadLook = smoothedGamepadLook:Lerp(target, math.min(1, GAMEPAD_LOOK_LERP_SPEED * dt))
+	if smoothedGamepadLook.Magnitude > 0 then
+		yaw -= smoothedGamepadLook.X * GAMEPAD_SENSITIVITY * dt
+		pitch = clampPitch(pitch - smoothedGamepadLook.Y * GAMEPAD_SENSITIVITY * dt)
+	end
 end
 
 local raycastParams = RaycastParams.new()
@@ -161,7 +184,7 @@ local function updateCamera(dt)
 		return
 	end
 
-	getLookInput(dt)
+	updateLookInput(dt)
 	setTargetDistance(targetDistance + ((leftTriggerValue - rightTriggerValue) * GAMEPAD_ZOOM_SPEED * dt))
 	currentDistance += (targetDistance - currentDistance) * math.min(1, ZOOM_LERP_SPEED * dt)
 
