@@ -27,15 +27,15 @@ function App() {
             <p className="text-sm text-slate-600">Gestione tariffa e liquidita</p>
           </div>
           <nav className="flex items-center gap-2 rounded-xl bg-slate-200 p-1">
-            <NavItem to="/liquidita">Liquidita</NavItem>
             <NavItem to="/tariffa">Tariffa</NavItem>
+            <NavItem to="/liquidita">Liquidita</NavItem>
           </nav>
         </div>
       </header>
 
       <div className="mx-auto max-w-6xl">
         <Routes>
-          <Route path="/" element={<Navigate to="/liquidita" replace />} />
+          <Route path="/" element={<Navigate to="/tariffa" replace />} />
           <Route path="/liquidita" element={<LiquiditaPage />} />
           <Route path="/tariffa" element={<TariffaPage />} />
         </Routes>
