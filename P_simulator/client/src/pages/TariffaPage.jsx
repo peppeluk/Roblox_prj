@@ -1,6 +1,28 @@
 import { useMemo, useState } from "react";
-import { IRPEF_SCAGLIONI_ATTUALI, calcolaTariffaMinima } from "../utils/calcoliTariffa";
+import RedditivitaTrendChart from "../components/RedditivitaTrendChart";
+import {
+  IRPEF_SCAGLIONI_ATTUALI,
+  calcolaAnalisiRedditivita,
+  calcolaTariffaMinima
+} from "../utils/calcoliTariffa";
 import { getAtecoPreset } from "../utils/tax/atecoProfiles";
+
+const monthNames = [
+  "Gennaio",
+  "Febbraio",
+  "Marzo",
+  "Aprile",
+  "Maggio",
+  "Giugno",
+  "Luglio",
+  "Agosto",
+  "Settembre",
+  "Ottobre",
+  "Novembre",
+  "Dicembre"
+];
+
+const currentMonth = new Date().getMonth() + 1;
 
 const initialForm = {
   regimeFiscale: "ordinario",
@@ -16,7 +38,12 @@ const initialForm = {
   usaCoeffManuale: false,
   coefficienteRedditivitaManuale: 78,
   flatTaxStartUp: false,
-  riduzioneContributiForfettario: false
+  riduzioneContributiForfettario: false,
+  abilitaAnalisiAttuale: true,
+  tariffaRealeAttuale: 45,
+  fatturatoYtd: 15000,
+  oreFatturateYtd: 320,
+  meseCorrente: currentMonth
 };
 
 const eur = new Intl.NumberFormat("it-IT", {
@@ -38,6 +65,12 @@ function readNumberInput(rawValue) {
 
 function formatPercent(value) {
   return `${number.format(value)}%`;
+}
+
+function formatSignedPercent(value) {
+  if (!Number.isFinite(value)) return "n/d";
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${number.format(value)}%`;
 }
 
 function formatScaglioneLabel(limiteInferiore, limiteSuperiore) {
@@ -139,6 +172,34 @@ function TariffaPage() {
     coefficienteRedditivita
   ]);
 
+  const analisiValidationError = useMemo(() => {
+    if (!form.abilitaAnalisiAttuale) return "";
+
+    if (!Number.isFinite(form.tariffaRealeAttuale) || form.tariffaRealeAttuale <= 0) {
+      return "Inserisci una tariffa reale attuale maggiore di zero.";
+    }
+
+    if (!Number.isFinite(form.fatturatoYtd) || form.fatturatoYtd < 0) {
+      return "Inserisci un fatturato YTD valido (>= 0).";
+    }
+
+    if (!Number.isFinite(form.oreFatturateYtd) || form.oreFatturateYtd < 0) {
+      return "Inserisci ore fatturate YTD valide (>= 0).";
+    }
+
+    if (!Number.isFinite(form.meseCorrente) || form.meseCorrente < 1 || form.meseCorrente > 12) {
+      return "Il mese corrente deve essere compreso tra 1 e 12.";
+    }
+
+    return "";
+  }, [
+    form.abilitaAnalisiAttuale,
+    form.tariffaRealeAttuale,
+    form.fatturatoYtd,
+    form.oreFatturateYtd,
+    form.meseCorrente
+  ]);
+
   const risultato = useMemo(() => {
     if (validationError) return null;
 
@@ -160,6 +221,43 @@ function TariffaPage() {
     form.oreSettimana,
     form.settimaneLavorative,
     form.regimeFiscale,
+    costiVariabiliPercentuale,
+    contributiPercentualeEffettiva,
+    aliquotaFlatTax,
+    coefficienteRedditivita
+  ]);
+
+  const analisiRedditivita = useMemo(() => {
+    if (!form.abilitaAnalisiAttuale || validationError || analisiValidationError) return null;
+
+    return calcolaAnalisiRedditivita({
+      redditoNettoAnnuale: form.redditoNettoAnnuale,
+      costiFissiAnnuali: form.costiFissiAnnuali,
+      costiVariabiliPercentuale,
+      contributiPercentuale: contributiPercentualeEffettiva,
+      oreSettimana: form.oreSettimana,
+      settimaneLavorative: form.settimaneLavorative,
+      regimeFiscale: form.regimeFiscale,
+      aliquotaFlatTax,
+      coefficienteRedditivita,
+      tariffaRealeAttuale: form.tariffaRealeAttuale,
+      fatturatoYtd: form.fatturatoYtd,
+      oreFatturateYtd: form.oreFatturateYtd,
+      meseCorrente: form.meseCorrente
+    });
+  }, [
+    form.abilitaAnalisiAttuale,
+    validationError,
+    analisiValidationError,
+    form.redditoNettoAnnuale,
+    form.costiFissiAnnuali,
+    form.oreSettimana,
+    form.settimaneLavorative,
+    form.regimeFiscale,
+    form.tariffaRealeAttuale,
+    form.fatturatoYtd,
+    form.oreFatturateYtd,
+    form.meseCorrente,
     costiVariabiliPercentuale,
     contributiPercentualeEffettiva,
     aliquotaFlatTax,
@@ -536,6 +634,201 @@ function TariffaPage() {
               ) : null}
             </div>
           )}
+        </section>
+
+        <section className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+                Analisi Situazione Attuale
+              </h2>
+              <p className="text-xs text-slate-500">
+                Inserisci andamento reale dell'anno per stimare il gap e le azioni di recupero.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                name="abilitaAnalisiAttuale"
+                checked={form.abilitaAnalisiAttuale}
+                onChange={handleBooleanChange}
+              />
+              Attiva analisi gap
+            </label>
+          </div>
+
+          {form.abilitaAnalisiAttuale ? (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <FormField
+                label="Tariffa reale attuale (EUR/h)"
+                hint="Tariffa media effettiva che stai applicando oggi."
+              >
+                <input
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+                  name="tariffaRealeAttuale"
+                  type="number"
+                  value={form.tariffaRealeAttuale}
+                  onChange={handleNumberChange}
+                  min="0.01"
+                  step="0.5"
+                />
+              </FormField>
+
+              <FormField
+                label="Fatturato YTD (EUR)"
+                hint="Fatturato dall'inizio dell'anno al mese corrente."
+              >
+                <input
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+                  name="fatturatoYtd"
+                  type="number"
+                  value={form.fatturatoYtd}
+                  onChange={handleNumberChange}
+                  min="0"
+                  step="100"
+                />
+              </FormField>
+
+              <FormField
+                label="Ore fatturate YTD"
+                hint="Se inserite, migliorano la stima della tariffa media effettiva."
+              >
+                <input
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+                  name="oreFatturateYtd"
+                  type="number"
+                  value={form.oreFatturateYtd}
+                  onChange={handleNumberChange}
+                  min="0"
+                  step="1"
+                />
+              </FormField>
+
+              <FormField
+                label="Mese corrente"
+                hint="Serve a calcolare la frazione di anno trascorsa."
+              >
+                <select
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 focus:border-slate-500 focus:outline-none"
+                  name="meseCorrente"
+                  value={form.meseCorrente}
+                  onChange={handleNumberChange}
+                >
+                  {monthNames.map((label, index) => (
+                    <option key={label} value={index + 1}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
+          ) : null}
+
+          {analisiValidationError ? (
+            <p className="mt-4 text-sm text-rose-600">{analisiValidationError}</p>
+          ) : null}
+
+          {form.abilitaAnalisiAttuale && analisiRedditivita ? (
+            <div className="mt-6 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Proiezione fatturato fine anno</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">
+                    {eur.format(analisiRedditivita.fatturatoStimatoFineAnno)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Proiezione netto fine anno</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">
+                    {eur.format(analisiRedditivita.nettoProiettatoFineAnno)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Gap netto vs target</p>
+                  <p
+                    className={`mt-1 text-lg font-semibold ${
+                      analisiRedditivita.gapNetto <= 0 ? "text-emerald-700" : "text-rose-700"
+                    }`}
+                  >
+                    {eur.format(analisiRedditivita.gapNetto)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Ricavi residui necessari</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">
+                    {eur.format(analisiRedditivita.ricaviResiduiNecessari)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Trend Fatturato (Target vs Reale)</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Scostamento YTD rispetto al target teorico:{" "}
+                  <span
+                    className={
+                      analisiRedditivita.scostamentoYtd >= 0
+                        ? "font-semibold text-emerald-700"
+                        : "font-semibold text-rose-700"
+                    }
+                  >
+                    {eur.format(analisiRedditivita.scostamentoYtd)}
+                  </span>
+                </p>
+                <div className="mt-3">
+                  <RedditivitaTrendChart
+                    labels={analisiRedditivita.trend.labels}
+                    targetSeries={analisiRedditivita.trend.targetSeries}
+                    projectedSeries={analisiRedditivita.trend.projectedSeries}
+                    actualSeries={analisiRedditivita.trend.actualSeries}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                  Suggerimento AI (beta)
+                </p>
+                <h3 className="mt-1 text-base font-semibold text-indigo-900">
+                  {analisiRedditivita.strategiaConsigliata.titolo}
+                </h3>
+                <p className="mt-1 text-sm text-indigo-900">
+                  {analisiRedditivita.strategiaConsigliata.descrizione}
+                </p>
+                {analisiRedditivita.strategiaConsigliata.azioni ? (
+                  <div className="mt-3 space-y-1 text-sm text-indigo-900">
+                    {analisiRedditivita.strategiaConsigliata.azioni.map((azione) => (
+                      <p key={azione}>- {azione}</p>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="mt-3 text-xs text-indigo-700">
+                  Nota: il suggerimento AI e un supporto operativo, non sostituisce consulenza
+                  fiscale/professionale.
+                </p>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-3">
+                {analisiRedditivita.strategie.map((strategia) => (
+                  <div key={strategia.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-sm font-semibold text-slate-900">{strategia.titolo}</p>
+                    {strategia.fattibile ? (
+                      <div className="mt-2 text-xs text-slate-600">
+                        <p>Tariffa: {eur.format(strategia.tariffaTarget)}</p>
+                        <p>Ore/settimana: {number.format(strategia.oreSettimanaliTarget)}</p>
+                        <p>Delta tariffa: {formatSignedPercent(strategia.deltaTariffaPercent)}</p>
+                        <p>Delta ore: {formatSignedPercent(strategia.deltaOrePercent)}</p>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-rose-600">
+                        Strategia non fattibile con i vincoli correnti.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </section>
       </div>
     </main>
